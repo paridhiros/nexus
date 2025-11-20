@@ -1,138 +1,167 @@
+# nexus/src/fastquery.py
 from __future__ import annotations
-from typing import Dict, List, Tuple, Optional, Set
+from collections import defaultdict, deque
+from typing import Dict, List, Tuple, Optional, Any
+
 from .state import GraphIndex
+from ._schemas import ClaimData  # adjust import path to match your project
 
 class FastQueryEngine:
     """
-    High-performance, in-memory graph engine.
+    In-memory engine that preloads entities, relationships and claims.
     """
 
-    def __init__(self, index):
-        self.index = index  # GraphIndex object
-        self.adj: Dict[str, List[Tuple[str, float]]] = {}  # node -> list[(neighbor, weight)]
-        self._load_graph()
+    def __init__(self, index: GraphIndex):
+        # allow either: pass existing GraphIndex or path
+        self.index = index
 
-    # ---------------------------------------------------------
-    # LOAD GRAPH INTO MEMORY
-    # ---------------------------------------------------------
-    def _load_graph(self):
-        """
-        Loads ALL relationships from SQLite (GraphIndex)
-        and builds adjacency list.
-        """
+        # In-memory data structures
+        # Map names -> canonical name (GraphIndex.resolve_alias already exists)
+        # Map canonical name -> entity_id
+        self.entity_name_to_id: Dict[str, int] = {}
+        # Map entity_id -> canonical name
+        self.entity_id_to_name: Dict[int, str] = {}
 
-        rows = self.index.dump_all_relationships()  # we will create this helper
+        # relationship_id -> relationship record
+        self.relationships: Dict[int, Dict[str, Any]] = {}
 
-        adj: Dict[str, List[Tuple[str, float]]] = {}
+        # adjacency: canonical_name -> list of (relationship_id, neighbor_name, strength, directed)
+        self.adj: Dict[str, List[Tuple[int, str, float, bool]]] = defaultdict(list)
 
-        for r in rows:
-            src = r["src"]
-            tgt = r["tgt"]
-            w   = r["strength"]
-            d   = bool(r["directed"])
+        # claim lookups
+        self.claims_for_entity: Dict[int, List[ClaimData]] = defaultdict(list)
+        self.claims_for_relationship: Dict[int, List[ClaimData]] = defaultdict(list)
 
-            adj.setdefault(src, [])
-            adj.setdefault(tgt, [])
+        # Load everything
+        self._load_all()
 
-            adj[src].append((tgt, w))
+    def _load_all(self):
+        # 1) Build entity name/id maps (pull from GraphIndex)
+        for name in self.index.list_all_entities():
+            # list_all_entities returns canonical names
+            with self.index._conn() as con:
+                row = con.execute("SELECT id FROM entities WHERE name = ?;", (name,)).fetchone()
+                if row:
+                    ent_id = row[0]
+                    self.entity_name_to_id[name] = ent_id
+                    self.entity_id_to_name[ent_id] = name
 
-            if not d:
-                adj[tgt].append((src, w))
+        # 2) Load relationships (use helper in GraphIndex)
+        rel_rows = self.index.dump_all_relationships()
+        for r in rel_rows:
+            rel_id = int(r["relationship_id"])
+            src = r["source_name"]
+            tgt = r["target_name"]
+            strength = float(r["strength"]) if r["strength"] is not None else 0.0
+            directed = bool(r["directed"])
 
-        self.adj = adj
+            self.relationships[rel_id] = {
+                "relationship_id": rel_id,
+                "source": src,
+                "target": tgt,
+                "strength": strength,
+                "directed": directed
+            }
 
-    # ---------------------------------------------------------
-    # BASIC OPS
-    # ---------------------------------------------------------
-    def neighbors(self, node: str) -> List[Tuple[str, float]]:
-        return self.adj.get(node, [])
+            # adjacency: store rel_id so we can map claims later
+            self.adj[src].append((rel_id, tgt, strength, directed))
+            if not directed:
+                # for undirected, also add reverse adjacency referencing same rel_id
+                self.adj[tgt].append((rel_id, src, strength, directed))
 
-    def has_node(self, node: str) -> bool:
-        return node in self.adj
+        # 3) Load claims (use helper)
+        claim_rows = self.index.dump_all_claims()
+        for c in claim_rows:
+            claim = ClaimData(
+                content=c["content"],
+                source=c["source"],
+                date_added=c["date_added"]
+            )
+            ent_id = c["entity_id"]
+            rel_id = c["relationship_id"]
+            if ent_id is not None:
+                self.claims_for_entity[int(ent_id)].append(claim)
+            if rel_id is not None:
+                self.claims_for_relationship[int(rel_id)].append(claim)
 
-    # ---------------------------------------------------------
-    # BFS
-    # ---------------------------------------------------------
-    def bfs(self, start: str, depth: int = 1) -> Set[str]:
-        """
-        Return set of nodes reachable within `depth`.
-        """
+    # Convenience: get claims for entity name
+    def get_entity_claims_by_name(self, entity_name: str) -> List[ClaimData]:
+        canonical = self.index.resolve_alias(entity_name)
+        ent_id = self.entity_name_to_id.get(canonical)
+        if ent_id is None:
+            return []
+        return self.claims_for_entity.get(ent_id, [])
 
-        if start not in self.adj:
-            return set()
+    # Convenience: get claims for relationship id
+    def get_relationship_claims(self, relationship_id: int) -> List[ClaimData]:
+        return self.claims_for_relationship.get(relationship_id, [])
 
-        visited = {start}
-        frontier = {start}
+    # neighbors returns structured items including relationship id and claims
+    def neighbours(self, entity_name: str, depth: int = 1):
+        canonical = self.index.resolve_alias(entity_name)
+        if canonical not in self.adj and canonical not in self.entity_name_to_id:
+            return []  # unknown node
 
-        for _ in range(depth):
-            next_frontier = set()
-            for n in frontier:
-                for nbr, _ in self.adj.get(n, []):
-                    if nbr not in visited:
-                        visited.add(nbr)
-                        next_frontier.add(nbr)
-            frontier = next_frontier
-            if not frontier:
+        # Level 0: the node itself with node claims
+        base_ent_id = self.entity_name_to_id.get(canonical)
+        result = {0: [{
+            "entity_name": canonical,
+            "entity_id": base_ent_id,
+            "relationship_id": None,
+            "entity_claims": self.claims_for_entity.get(base_ent_id, []),
+            "relationship_claims": []
+        }]}
+
+        visited = {canonical}
+        frontier = [canonical]
+
+        for d in range(1, depth + 1):
+            next_frontier = []
+            level_items = []
+            for src in frontier:
+                for (rel_id, nbr_name, strength, directed) in self.adj.get(src, []):
+                    if nbr_name in visited:
+                        continue
+                    visited.add(nbr_name)
+                    next_frontier.append(nbr_name)
+
+                    nbr_ent_id = self.entity_name_to_id.get(nbr_name)
+                    level_items.append({
+                        "entity_name": nbr_name,
+                        "entity_id": nbr_ent_id,
+                        "relationship_id": rel_id,
+                        "entity_claims": self.claims_for_entity.get(nbr_ent_id, []),
+                        "relationship_claims": self.claims_for_relationship.get(rel_id, []),
+                        "strength": strength,
+                        "directed": directed
+                    })
+            if not level_items:
                 break
+            result[d] = level_items
+            frontier = next_frontier
 
-        visited.remove(start)
-        return visited
-
-    # ---------------------------------------------------------
-    # DFS (optional)
-    # ---------------------------------------------------------
-    def dfs(self, start: str, max_depth: int = 5):
-        """
-        Returns list of nodes reachable by DFS (depth-limited).
-        """
-        result = []
-        visited = set()
-
-        def _dfs(node: str, d: int):
-            if d > max_depth or node in visited:
-                return
-            visited.add(node)
-            result.append(node)
-            for nbr, _ in self.adj.get(node, []):
-                _dfs(nbr, d + 1)
-
-        _dfs(start, 0)
-        result.remove(start)
         return result
 
-    # ---------------------------------------------------------
-    # MULTI-HOP RETRIEVAL WITH WEIGHTS
-    # ---------------------------------------------------------
-    def walk(self, start: str, depth: int = 3) -> List[Tuple[str, float]]:
-        """
-        Returns all reachable nodes, with cumulative path score.
-        Score = sum(weight) or you can make it multiplicative.
-        """
-
-        results: Dict[str, float] = {}
-        frontier = [(start, 0.0)]
-
-        for _ in range(depth):
-            new_frontier = []
-            for node, score in frontier:
-                for nbr, w in self.adj.get(node, []):
-                    new_score = score + (w or 0.0)
-                    if nbr not in results or new_score > results[nbr]:
-                        results[nbr] = new_score
-                        new_frontier.append((nbr, new_score))
-            frontier = new_frontier
-
-        if start in results:
-            del results[start]
-
-        return sorted(results.items(), key=lambda x: -x[1])
-    
-    # ------------------------------
-    # CLAIM FETCHING
-    # ------------------------------
-
-    def claims_for_entity(self, entity: str):
-        return self.index.fetch_claims_for_entity(entity)
-
-    def claims_between(self, src: str, tgt: str):
-        return self.index.fetch_claims_between(src, tgt)
+    # shortest_path uses relationship/adjacency as loaded (BFS)
+    def shortest_path(self, src_name: str, tgt_name: str) -> Optional[List[str]]:
+        src = self.index.resolve_alias(src_name)
+        tgt = self.index.resolve_alias(tgt_name)
+        if src == tgt:
+            return [src]
+        q = deque([src])
+        parent = {src: None}
+        while q:
+            node = q.popleft()
+            for (_, nbr, _, _) in self.adj.get(node, []):
+                if nbr not in parent:
+                    parent[nbr] = node
+                    if nbr == tgt:
+                        # reconstruct
+                        path = [tgt]
+                        cur = node
+                        while cur is not None:
+                            path.append(cur)
+                            cur = parent[cur]
+                        return list(reversed(path))
+                    q.append(nbr)
+        return None
