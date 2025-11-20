@@ -1148,3 +1148,21 @@ class GraphIndex:
                 )
                 for row in rows
             ]
+        
+
+    def dump_all_relationships(self):
+        """
+        Returns list of all relationships with resolved names.
+        """
+        with self._conn() as con:
+            rows = con.execute("""
+                SELECT e1.name AS src,
+                    e2.name AS tgt,
+                    r.strength AS strength,
+                    r.directed AS directed
+                FROM relationships r
+                JOIN entities e1 ON e1.id = r.source_id
+                JOIN entities e2 ON e2.id = r.target_id;
+            """).fetchall()
+
+        return rows
