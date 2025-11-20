@@ -1156,8 +1156,10 @@ class GraphIndex:
         """
         with self._conn() as con:
             rows = con.execute("""
-                SELECT e1.name AS src,
-                    e2.name AS tgt,
+                SELECT
+                    r.id AS relationship_id,
+                    e1.name AS source_name,
+                    e2.name AS target_name,
                     r.strength AS strength,
                     r.directed AS directed
                 FROM relationships r
@@ -1165,4 +1167,19 @@ class GraphIndex:
                 JOIN entities e2 ON e2.id = r.target_id;
             """).fetchall()
 
+        return rows
+        
+    
+    def dump_all_claims(self):
+        """Return list of dict-like rows for all claims (entity_id or relationship_id present)."""
+        with self._conn() as con:
+            rows = con.execute("""
+                SELECT id AS claim_id,
+                    entity_id,
+                    relationship_id,
+                    content,
+                    source,
+                    date_added
+                FROM claims;
+            """).fetchall()
         return rows
