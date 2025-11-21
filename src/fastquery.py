@@ -143,25 +143,32 @@ class FastQueryEngine:
         return result
 
     # shortest_path uses relationship/adjacency as loaded (BFS)
-    def shortest_path(self, src_name: str, tgt_name: str) -> Optional[List[str]]:
+    def shortest_path(self, src_name, tgt_name):
         src = self.index.resolve_alias(src_name)
         tgt = self.index.resolve_alias(tgt_name)
         if src == tgt:
-            return [src]
-        q = deque([src])
-        parent = {src: None}
+            return []
+
+        q = deque([(src, None)])  # (node, rel_id_used)
+        parent = {src: (None, None)}  # node -> (parent_node, rel_id)
+
         while q:
-            node = q.popleft()
-            for (_, nbr, _, _) in self.adj.get(node, []):
+            node, rel_used = q.popleft()
+
+            for (rel_id, nbr, _, _) in self.adj.get(node, []):
                 if nbr not in parent:
-                    parent[nbr] = node
+                    parent[nbr] = (node, rel_id)
+
                     if nbr == tgt:
-                        # reconstruct
-                        path = [tgt]
-                        cur = node
-                        while cur is not None:
-                            path.append(cur)
-                            cur = parent[cur]
+                        # reconstruct path with relationship IDs
+                        path = []
+                        cur = tgt
+                        while cur != src:
+                            pnode, prel = parent[cur]
+                            path.append((pnode, cur, prel))
+                            cur = pnode
                         return list(reversed(path))
-                    q.append(nbr)
+
+                    q.append((nbr, rel_id))
+
         return None
