@@ -356,7 +356,7 @@ class GraphIndex:
             # load claims from all these entity IDs
             id_placeholders = ','.join('?' * len(entity_id_list))
             rows = con.execute(f"""
-                SELECT content, source, date_added 
+                SELECT content, source, date_added, claim_date
                 FROM claims 
                 WHERE entity_id IN ({id_placeholders});
             """, entity_id_list).fetchall()
@@ -365,7 +365,8 @@ class GraphIndex:
                 ClaimData(
                     content=row["content"],
                     source=row["source"],
-                    date_added=row["date_added"]
+                    date_added=row["date_added"],
+                    claim_date=row["claim_date"]
                 )
                 for row in rows
             ]
@@ -470,7 +471,7 @@ class GraphIndex:
             
             placeholders = ",".join("?" * len(rel_ids))
             rows = con.execute(f"""
-                SELECT content, source, date_added
+                SELECT content, source, date_added, claim_date
                 FROM claims
                 WHERE relationship_id IN ({placeholders});
             """, rel_ids).fetchall()
@@ -479,7 +480,8 @@ class GraphIndex:
                 ClaimData(
                     content=row["content"],
                     source=row["source"],
-                    date_added=row["date_added"]
+                    date_added=row["date_added"],
+                    claim_date=row["claim_date"]
                 )
                 for row in rows
             ]
@@ -1135,7 +1137,7 @@ class GraphIndex:
             entity_id = entity_row[0]
             
             rows = con.execute("""
-                SELECT content, source, date_added 
+                SELECT content, source, date_added, claim_date
                 FROM claims 
                 WHERE entity_id = ?;
             """, (entity_id,)).fetchall()
@@ -1144,7 +1146,8 @@ class GraphIndex:
                 ClaimData(
                     content=row["content"],
                     source=row["source"],
-                    date_added=row["date_added"]
+                    date_added=row["date_added"],
+                    claim_date=row["claim_date"]
                 )
                 for row in rows
             ]

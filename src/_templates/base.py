@@ -15,8 +15,8 @@ PERSON: Individual humans referenced by full name as written in the text (retain
 -Do NOT Extract (ever)-
 Generic or referential nouns: "the document", "the page", "the agency", etc. (unless a capitalized proper noun),
 or roles/titles/honorifics ("Dr.", "Mr.", "Mrs., "Ms.", "Agent", etc.) as part of a name.
-Descriptions, however, may include roles/titles/honorifics.
-If a concept must be referenced inside a description, prefer an indefinite phrase (e.g., 'a 1324 royal charter') over definite anaphora ('the charter').
+Claims, however, may include roles/titles/honorifics.
+If a concept must be referenced inside a claim, prefer an indefinite phrase (e.g., 'a 1324 royal charter') over definite anaphora ('the charter').
 
 -Steps-
 
@@ -26,22 +26,22 @@ Identify all entities in the text that match the allowed types. For each entity:
       *PERSON* => full name only (no titles/honorifics/adjectives),
       *ORG/GEO* => no leading "the" unless integral to the proper noun.
   - entity_type: one of the allowed types.
-  - entity_description: A comprehensive description or claim about the entity's attributes, activities, or status, as expressed in the text
+  - entity_claim: A comprehensive claim about the entity's attributes, activities, or status, as expressed in the text
       (dates/roles/actions/locations allowed). Avoid anaphora like "the document"; 
       use indefinite phrasing if needed ("a 1527 manuscript page", not "the document").
       The same entity may appear multiple times if the text describes it in different contexts or makes multiple distinct claims,
       so do not overfill a claim (rather split different claims into multiple "entity" rows for that entity, keeping the exact `entity_type` and `entity_name`.)
-      entity_description must be entity-centric and self-contained. Do not encode inter-entity actions (e.g., 'suspended by X', 'subject of Y') in entity descriptions; reserve those for relationship tuples.
+      entity_claim must be entity-centric and self-contained. Do not encode inter-entity actions (e.g., 'suspended by X', 'subject of Y') in entity claims; reserve those for relationship tuples.
 Format each entity as:
-("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
+("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_claim>)
 
 2) Relationships
 Identify clear relationships between extracted entities (source_entity, target_entity). For each such relationship, extract:
   - source_entity and target_entity MUST EXACTLY MATCH a previously extracted entity_name.
-  - relationship_description: concise explanation of the link claimed in the text, including any inferred connection.
+  - relationship_claim: concise explanation of the link claimed in the text, including any inferred connection.
 Only create relationships whose endpoints are both previously extracted entities.
 Format each relationship as:
-("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>)
+("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_claim>)
 
 3) Output formatting
 - Return all tuples as a single list, using **{record_delimiter}** between tuples.
@@ -55,7 +55,7 @@ Format each relationship as:
 
 -Quality-Control Checklist (must be TRUE before output)-
 [ ] Every entity_type ∈ {entity_types}
-[ ] Every entity_description is intrinsic to that entity (role, scope, mandate, attributes, status) and contains no cross-references ('by the ministry', 'in the review', 'referenced in captions')
+[ ] Every entity_claim is intrinsic to that entity (role, scope, mandate, attributes, status) and contains no cross-references ('by the ministry', 'in the review', 'referenced in captions')
 [ ] No tuple contains a generic/referential/banned entity
 [ ] No titles/honorifics/role descriptors inside PERSON names
 [ ] Every relationship endpoint appears in at least one prior 'entity' tuple with identical casing and accents.

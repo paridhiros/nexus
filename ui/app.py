@@ -68,6 +68,7 @@ class Claim(BaseModel):
     content: str
     source: Optional[str] = None
     date_added: Optional[str] = None
+    claim_date: Optional[str] = None
 
 
 class EntityResponse(BaseModel):
@@ -133,16 +134,25 @@ def _fetch_entity_types(index_path: Path) -> Dict[str, Optional[str]]:
 def _build_graph_snapshot(index: GraphIndex, index_path: Path) -> GraphSnapshot:
     entities = index.list_all_entities()
     entity_types = _fetch_entity_types(index_path)
+
+    canonicals = set()
+    for name in entities:
+        resolved = index.resolve_alias(name)
+        canonicals.add(resolved)
+    
+    filtered_entities = [name for name in entities if index.resolve_alias(name) == name]
+
     nodes: List[GraphNode] = []
-    adjacency: Dict[str, set[str]] = {name: set() for name in entities}
+    adjacency: Dict[str, set[str]] = {name: set() for name in filtered_entities}
     seen_edges: Dict[tuple[str, str], GraphEdge] = {}
 
-    for name in entities:
+    for name in filtered_entities:
         try:
             claims = index.load_entity_claims(name)
         except EntityNotFoundError:
             claims = []
         claim_count = len(claims)
+
         node = GraphNode(
             id=name,
             label=name,
@@ -155,6 +165,7 @@ def _build_graph_snapshot(index: GraphIndex, index_path: Path) -> GraphSnapshot:
             relationships = index.load_relationships(name, directed=None)
         except EntityNotFoundError:
             relationships = []
+
         for rel in relationships:
             src = index.resolve_alias(rel.source_name)
             tgt = index.resolve_alias(rel.target_name)
@@ -194,9 +205,9 @@ def _build_graph_snapshot(index: GraphIndex, index_path: Path) -> GraphSnapshot:
 
 
 def _sort_claims(claims: List[Claim]) -> List[Claim]:
-    dated = [claim for claim in claims if claim.date_added]
-    undated = [claim for claim in claims if not claim.date_added]
-    dated.sort(key=lambda c: c.date_added, reverse=True)
+    dated = [claim for claim in claims if claim.claim_date]
+    undated = [claim for claim in claims if not claim.claim_date]
+    dated.sort(key=lambda c: c.claim_date, reverse=True)
     return dated + undated
 
 
@@ -217,12 +228,12 @@ def serve_index() -> FileResponse:
     return FileResponse(index_file)
 
 
-@app.get("/app.js", response_class=FileResponse)
+@app.get("/app.js?v=0.1", response_class=FileResponse)
 def serve_app_js() -> FileResponse:
     asset = FRONTEND_DIR / "app.js"
     if not asset.exists():
         raise HTTPException(status_code=404, detail="app.js not found.")
-    return FileResponse(asset, media_type="application/javascript")
+    return FileResponse(asset, media_type="application/javascript", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/styles.css", response_class=FileResponse)
@@ -233,11 +244,11 @@ def serve_styles() -> FileResponse:
     return FileResponse(asset, media_type="text/css")
 
 
-@app.get("/favicon.ico", response_class=FileResponse)
+@app.get("/favicon.svg", response_class=FileResponse)
 def serve_favicon() -> FileResponse:
-    asset = FRONTEND_DIR / "favicon.ico"
+    asset = FRONTEND_DIR / "favicon.svg"
     if not asset.exists():
-        raise HTTPException(status_code=404, detail="favicon.ico not found.")
+        raise HTTPException(status_code=404, detail="favicon.svg not found.")
     return FileResponse(asset, media_type="image/x-icon", headers={"Cache-Control": "no-store"})
 
 
@@ -258,7 +269,7 @@ def get_entity(name: str, request: Request) -> EntityResponse:
         raise HTTPException(status_code=404, detail=f"Entity '{name}' not found.")
 
     claims = [
-        Claim(content=record.content, source=record.source, date_added=record.date_added)
+        Claim(content=record.content, source=record.source, date_added=record.date_added, claim_date=record.claim_date)
         for record in claims_data
     ]
     claims = _sort_claims(claims)
@@ -325,7 +336,7 @@ def get_edge(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     claims = [
-        Claim(content=record.content, source=record.source, date_added=record.date_added)
+        Claim(content=record.content, source=record.source, date_added=record.date_added, claim_date=record.claim_date)
         for record in claims_data
     ]
     claims = _sort_claims(claims)

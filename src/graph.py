@@ -46,8 +46,6 @@ class Relationship:
         
         found = None
 
-
-
         if directed:
             # exact directed match: src->tgt only
             for r in self._state.load_relationships(self.canonical_source_name, min_strength=None, directed=True):
@@ -64,14 +62,19 @@ class Relationship:
                     if key in seen:
                         continue
                     seen.add(key)
-                    if not r.directed and {r.source_name, r.target_name} == {self.canonical_source_name, self.canonical_target_name}:
+                    if not r.directed and {
+                        self._state.resolve_alias(r.source_name),
+                        self._state.resolve_alias(r.target_name)
+                    } == {
+                        self.canonical_source_name,
+                        self.canonical_target_name
+                    }:
                         found = r
                         break
                 if found:
                     break
         if found is None:
             raise RelationshipNotFoundError(src, tgt, directed)
-
 
         self.directed = found.directed
         self.strength = found.strength

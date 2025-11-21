@@ -191,7 +191,7 @@
         ${claims
           .map((claim) => {
             const source = claim.source ? escapeHTML(claim.source) : "Unknown source";
-            const date = claim.date_added ? escapeHTML(claim.date_added) : "Unknown date";
+            const date = claim.claim_date ? escapeHTML(claim.claim_date) : "Unknown date";
             return `
               <article class="claim-item">
                 <header>
