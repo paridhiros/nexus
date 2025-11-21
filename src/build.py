@@ -242,7 +242,7 @@ class GraphBuilder:
         for entity in entities:
             entity_name = entity["entity_name"]
             entity_type = entity["entity_type"]
-            claim = entity.get("entity_description")
+            claim = entity.get("entity_claim")
             claim_date = entity.get("claim_date", None)
             source = entity.get("source", None)
 
@@ -255,7 +255,7 @@ class GraphBuilder:
         for relationship in relationships:
             source_name = relationship["source_name"]
             target_name = relationship["target_name"]
-            claim = relationship["relationship_description"]
+            claim = relationship["relationship_claim"]
             claim_date = relationship.get("claim_date", None)
             source = relationship.get("source", None)
 
@@ -327,18 +327,18 @@ class GraphBuilder:
                 fields = [_clean(f) for f in raw_fields]
 
                 if kind == "entity":
-                    name, etype, desc = fields
+                    name, etype, claim = fields
                     entities.append({
                         "entity_name": name,
                         "entity_type": etype,
-                        "entity_description": desc
+                        "entity_claim": claim
                     })
                 elif kind == "relationship":
-                    src, tgt, desc = fields
+                    src, tgt, claim = fields
                     relationships.append({
                         "source_name": src,
                         "target_name": tgt,
-                        "relationship_description": desc
+                        "relationship_claim": claim
                     })
             except Exception as exc:
                 log.error("Failed to parse block: %s | Message: %s", block, exc)
